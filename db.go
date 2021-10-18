@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"github.com/dgraph-io/badger/v3"
 	"github.com/phuslu/log"
+	"strings"
 )
 
 type Db struct {
@@ -41,8 +42,8 @@ func (d *Db) Close() error {
 
 func (d *Db) Get(key string) (byte, error) {
 	var v []byte
+
 	err := d.b.View(func(txn *badger.Txn) error {
-		// Your code here…
 		val, err := txn.Get([]byte(key))
 		if err != nil {
 			return err
@@ -50,6 +51,7 @@ func (d *Db) Get(key string) (byte, error) {
 		v, err = val.ValueCopy(nil)
 		return err
 	})
+
 	if errors.Is(err, badger.ErrKeyNotFound) {
 		return 0, ErrNotFound
 	}
@@ -63,9 +65,52 @@ func (d *Db) Get(key string) (byte, error) {
 }
 
 func (d *Db) Set(key string, value byte) error {
+
 	err := d.b.Update(func(txn *badger.Txn) error {
 		err := txn.Set([]byte(key), []byte{value})
 		return err
 	})
+
 	return err
+}
+
+func (d *Db) constructUserKey(user string) []byte {
+	return []byte("username_" + strings.ToLower(user))
+}
+
+func (d *Db) SetUserID(user string, id int64) error {
+	if user  == "" {
+		return errors.New("empty user name")
+	}
+	err := d.b.Update(func(txn *badger.Txn) error {
+		err := txn.Set(d.constructUserKey(user), Int64ToByteArr(id))
+		return err
+	})
+
+	return err
+}
+
+func (d *Db) GetUserID(user string) (int64, error) {
+	var v []byte
+
+	err := d.b.View(func(txn *badger.Txn) error {
+		val, err := txn.Get(d.constructUserKey(user))
+		if err != nil {
+			return err
+		}
+		v, err = val.ValueCopy(nil)
+		return err
+	})
+
+	if errors.Is(err, badger.ErrKeyNotFound) {
+		return 0, ErrNotFound
+	}
+	if err != nil {
+		return 0, err
+	}
+	id, err := ByteArrToInt64(v)
+	if err != nil {
+		return 0, err
+	}
+	return id, nil
 }

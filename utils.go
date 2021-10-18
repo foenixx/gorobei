@@ -1,6 +1,8 @@
 package main
 
 import (
+	"encoding/binary"
+	"errors"
 	"fmt"
 	"unicode/utf8"
 )
@@ -44,4 +46,19 @@ func ShortenString(s string, first int, last int) string {
 	} else {
 		return fmt.Sprintf("%s...%s", FirstN(s, first), l)
 	}
+}
+
+
+func Int64ToByteArr(v int64) []byte {
+	b := make([]byte, 8)
+	binary.LittleEndian.PutUint64(b, uint64(v))
+	return b
+
+}
+
+func ByteArrToInt64(v []byte) (int64, error) {
+	if len(v) != 8 {
+		return 0, errors.New("input array has wrong length")
+	}
+	return int64(binary.LittleEndian.Uint64(v)), nil
 }

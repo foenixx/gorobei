@@ -24,3 +24,30 @@ func TestDb_Set(t *testing.T) {
 	assert.ErrorIs(t, err, ErrNotFound)
 
 }
+
+func TestDb_SetGetUserID(t *testing.T) {
+	initLog(false)
+	path := "./gorobei_test_db"
+	d, err := OpenDb(path)
+	require.NoError(t, err)
+	defer os.RemoveAll(path)
+	defer d.Close()
+
+	err = d.SetUserID("someuser", 100)
+	require.NoError(t, err)
+
+	v, err := d.GetUserID("someuser")
+	require.NoError(t, err)
+	assert.Equal(t, int64(100), v)
+
+	err = d.SetUserID("someuser", -100)
+	require.NoError(t, err)
+
+	v, err = d.GetUserID("someuser")
+	require.NoError(t, err)
+	assert.Equal(t, int64(-100), v)
+
+	v, err = d.GetUserID("nosuchuser")
+	assert.ErrorIs(t, err, ErrNotFound)
+
+}
