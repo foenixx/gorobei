@@ -29,7 +29,7 @@ func OpenDb(path string) (*Db, error) {
 	}
 
 	err = d.RunValueLogGC(0.5)
-	if err != nil && !errors.Is(err, badger.ErrNoRewrite){
+	if err != nil && !errors.Is(err, badger.ErrNoRewrite) {
 		return nil, err
 	}
 
@@ -79,7 +79,7 @@ func (d *Db) constructUserKey(user string) []byte {
 }
 
 func (d *Db) SetUserID(user string, id int64) error {
-	if user  == "" {
+	if user == "" {
 		return errors.New("empty user name")
 	}
 	err := d.b.Update(func(txn *badger.Txn) error {

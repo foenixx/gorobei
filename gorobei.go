@@ -17,16 +17,20 @@ import (
 )
 
 type Gorobei struct {
-	d *Db
-	bot *telego.Bot
-	chat   string
-	chatId int64
+	d       *Db
+	bot     *telego.Bot
+	chat    string
+	chatId  int64
 	admin   string
 	adminId int64
+	limiter *RateLimiter
+	adminLimiter *RateLimiter
 }
 
+var ErrImageAlreadyProcessed = errors.New("image has been processed already")
+
 func (g *Gorobei) Init() error {
-	params := &telego.GetChatParams{ChatID: telego.ChatID{ Username: g.chat }}
+	params := &telego.GetChatParams{ChatID: telego.ChatID{Username: g.chat}}
 	chat, err := g.bot.GetChat(params)
 	if err != nil {
 		return err
@@ -47,7 +51,6 @@ func (g *Gorobei) Init() error {
 			}
 		}
 	}
-
 	return nil
 }
 
@@ -57,7 +60,6 @@ func (g *Gorobei) Close() error {
 	}
 	return nil
 }
-
 
 func (g *Gorobei) Fetch(url string, limit int) error {
 	client := http.Client{
@@ -77,44 +79,53 @@ func (g *Gorobei) Fetch(url string, limit int) error {
 
 	re := regexp.MustCompile(`(?si)<div class="singlePost.*?<div class="postInner">\s*?<div class="paragraph">[^<]*<div[^<]*<img src=["']{1}(.*?)["']{1}`)
 	ma := re.FindAllStringSubmatch(string(body), -1)
-	var n = 0
+	var total,skipped, errc int
 	for _, m := range ma {
 		if len(m) == 2 && m[1] != `https://i.imgur.com/sMhpFyR.jpg` {
 			src := m[1]
 			log.Info().Str("src", src).Msg("image found")
 			err = g.processImage(src)
 			if err != nil {
-				log.Error().Err(err).Str("src", src).Msg("cannot process image")
-				msg := fmt.Sprintf("Error occured during processing the image\\!\n[image](%s)\n\n__error__:\n```\n%s\n```", src,err.Error())
-				err2 := g.SendAdminMessage(msg)
-				if err2 != nil {
-					log.Error().Err(err2).Msg("cannot send admin message")
+				if errors.Is(err, ErrImageAlreadyProcessed) {
+					skipped += 1
+				} else {
+					errc += 1
+					log.Error().Err(err).Str("src", src).Msg("cannot process image")
+					msg := fmt.Sprintf("Error occured during processing the image\\!\n[image](%s)\n\n__error__:\n```\n%s\n```", src, err.Error())
+					err2 := g.SendAdminMessage(msg)
+					if err2 != nil {
+						log.Error().Err(err2).Msg("cannot send admin message")
+					}
 				}
 			}
-			n += 1
-			if limit > 0 && n >= limit {
+
+			total += 1
+			if limit > 0 && total >= limit {
 				break //for
 			}
 		} else {
 			log.Error().Str("src", m[0]).Msg("unexpected regex match")
 		}
 	}
-	return nil
+
+	msg := fmt.Sprintf("Fetching images from the [page](%s) completed\\.\nTotal: %v\nNew: %v\nSkipped: %v\nErrors: %v", url, total, total - skipped, skipped, errc)
+	err = g.SendAdminMessage(msg)
+	return err
 }
 
-var ImageExt = map[string]string {
-	"image/bmp": "bmp",
-	"image/gif": "gif",
-	"image/jpeg": "jpeg",
-	"image/png": "png",
+var ImageExt = map[string]string{
+	"image/bmp":     "bmp",
+	"image/gif":     "gif",
+	"image/jpeg":    "jpeg",
+	"image/png":     "png",
 	"image/svg+xml": "svg",
-	"image/tiff": "tiff",
-	"image/webp": "webp",
+	"image/tiff":    "tiff",
+	"image/webp":    "webp",
 }
 
 func (g *Gorobei) downloadImage(src string) (string, error) {
 	client := http.Client{
-		Timeout: 5 * time.Second,
+		Timeout: 15 * time.Second,
 	}
 	resp, err := client.Get(src)
 	if err != nil {
@@ -130,7 +141,7 @@ func (g *Gorobei) downloadImage(src string) (string, error) {
 	if !ok {
 		return "", fmt.Errorf("unsupported mediatype: %s", mediatype)
 	}
-	f, err := ioutil.TempFile("", "*." + ext)
+	f, err := ioutil.TempFile("", "*."+ext)
 	defer f.Close()
 	log.Info().Str("file", f.Name()).Msg("image temp file name")
 	r := bufio.NewReader(resp.Body)
@@ -148,7 +159,7 @@ func (g *Gorobei) processImage(src string) error {
 	}
 	if done == 1 {
 		log.Info().Str("src", src).Msg("image has been processed already")
-		return nil
+		return ErrImageAlreadyProcessed
 	}
 	path, err := g.downloadImage(src)
 	if err != nil {
@@ -160,7 +171,7 @@ func (g *Gorobei) processImage(src string) error {
 		log.Error().Err(err).Msg("cannot send fetched image to the chat")
 		return err
 	}
-	err = g.d.Set(src,1)
+	err = g.d.Set(src, 1)
 	return err
 
 }
@@ -190,10 +201,14 @@ func (g *Gorobei) constructChatId(user string, userId int64) (*telego.ChatID, er
 }
 
 func (g *Gorobei) SendChatImage(image string, caption string) error {
-	return g.SendImage("", g.chatId, image, caption)
+	return g.SendImage("", g.chatId, image, caption, nil)
 }
 
-func (g *Gorobei) SendImage(user string, userId int64, image string, caption string) error {
+func (g *Gorobei) SendImage(user string, userId int64, image string, caption string, limiter *RateLimiter) error {
+	if limiter == nil {
+		limiter = g.limiter
+	}
+	limiter.TikTak()
 	chatId, err := g.constructChatId(user, userId)
 	if err != nil {
 		return err
@@ -207,25 +222,27 @@ func (g *Gorobei) SendImage(user string, userId int64, image string, caption str
 	}
 
 	params := &telego.SendPhotoParams{
-		ChatID:                   *chatId,
-		Photo:                    telego.InputFile{ File: f},
-		Caption:                  caption,
+		ChatID:  *chatId,
+		Photo:   telego.InputFile{File: f},
+		Caption: caption,
 	}
 	_, err = g.bot.SendPhoto(params)
-	return  err
+	return err
 }
 
-
-func (g *Gorobei) SendMessage(user string, userID int64, message string, mode string) error {
-
+func (g *Gorobei) SendMessage(user string, userID int64, message string, mode string, limiter *RateLimiter) error {
+	if limiter == nil {
+		limiter = g.limiter
+	}
+	limiter.TikTak()
 	chatId, err := g.constructChatId(user, userID)
 	if err != nil {
 		return err
 	}
 
 	params := &telego.SendMessageParams{
-		ChatID:                   *chatId,
-		Text:                     message,
+		ChatID:    *chatId,
+		Text:      message,
 		ParseMode: mode,
 	}
 	_, err = g.bot.SendMessage(params)
@@ -233,28 +250,28 @@ func (g *Gorobei) SendMessage(user string, userID int64, message string, mode st
 }
 
 func (g *Gorobei) SendChatMessage(message string) error {
-	return g.SendMessage("", g.chatId, message, "")
+	return g.SendMessage("", g.chatId, message, "", nil)
 }
-
 
 func (g *Gorobei) SendAdminMessage(message string) error {
 	if g.adminId == 0 {
 		return nil
 	}
-	return g.SendMessage("", g.adminId, message, "MarkdownV2")
-}
 
-func (g *Gorobei) processUpdates()  error {
+	return g.SendMessage("", g.adminId, message, "MarkdownV2", g.adminLimiter)
+}
+// https://api.telegram.org/bot<TOKEN>/getUpdates
+//
+func (g *Gorobei) processUpdates() error {
 	var err error
 	var updates []telego.Update
 	params := &telego.GetUpdatesParams{
-		Timeout:        0,
+		Timeout: 0,
 	}
 	updates, err = g.bot.GetUpdates(params)
 	if err != nil {
 		return err
 	}
-
 
 	for _, u := range updates {
 		if u.Message != nil {

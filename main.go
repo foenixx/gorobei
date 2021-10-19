@@ -20,7 +20,13 @@ func NewGorobeiPoster(cli *CLI) (*Gorobei, error) {
 		return nil, err
 	}
 
-	g := &Gorobei{d: db, bot: tel, chat: cli.Chat, admin: cli.Admin}
+	g := &Gorobei{d: db,
+		bot: tel,
+		chat: cli.Chat,
+		admin: cli.Admin,
+		limiter: NewLimiter(),
+		adminLimiter: NewLimiter()}
+
 	err = g.Init()
 	if err != nil {
 		db.Close()
@@ -54,7 +60,7 @@ func main() {
 		}
 	case CmdSendMsg:
 		log.Info().Str("username", cli.SendMsg.Username).Str("message", cli.SendMsg.Message).Msg("send message command params")
-		err = g.SendMessage(cli.SendMsg.Username, 0, cli.SendMsg.Message, "")
+		err = g.SendMessage(cli.SendMsg.Username, 0, cli.SendMsg.Message, "", nil)
 		if err != nil {
 			log.Error().Err(err).Msg("cannot send message")
 			os.Exit(1)
@@ -78,7 +84,7 @@ func main() {
 		}
 	case CmdSendImg:
 		log.Info().Str("user", cli.SendImg.Username).Str("caption", cli.SendImg.Caption).Str("path", cli.SendImg.ImagePath).Msg("send image params")
-		err = g.SendImage(cli.SendImg.Username, 0, cli.SendImg.ImagePath, cli.SendImg.Caption)
+		err = g.SendImage(cli.SendImg.Username, 0, cli.SendImg.ImagePath, cli.SendImg.Caption, nil)
 		if err != nil {
 			log.Error().Err(err).Msg("cannot send image")
 			os.Exit(1)

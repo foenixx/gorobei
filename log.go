@@ -29,7 +29,6 @@ func (a *LogAdapter) Debugf(s string, i ...interface{}) {
 	a.logger.Debug().Msgf(s, i...)
 }
 
-
 func initLog(verbose bool) {
 	//if log.IsTerminal(os.Stderr.Fd()) {
 	w := &log.ConsoleWriter{
@@ -49,5 +48,3 @@ func initLog(verbose bool) {
 		Writer:     w,
 	}
 }
-
-

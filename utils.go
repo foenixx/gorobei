@@ -22,7 +22,7 @@ func FirstN(s string, n int) string {
 
 func LastN(s string, len int, n int) string {
 
-	skipFirstN :=  len - n
+	skipFirstN := len - n
 	i := 0
 	//iterate over runes
 	for j := range s {
@@ -36,7 +36,7 @@ func LastN(s string, len int, n int) string {
 
 func ShortenString(s string, first int, last int) string {
 	ln := utf8.RuneCountInString(s)
-	if ln <= first + last + 3 {
+	if ln <= first+last+3 {
 		//nothing to shor...ten
 		return s
 	}
@@ -47,7 +47,6 @@ func ShortenString(s string, first int, last int) string {
 		return fmt.Sprintf("%s...%s", FirstN(s, first), l)
 	}
 }
-
 
 func Int64ToByteArr(v int64) []byte {
 	b := make([]byte, 8)
