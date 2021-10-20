@@ -1,8 +1,8 @@
 package main
 
 import (
-	"github.com/mymmrac/telego"
 	"github.com/phuslu/log"
+	"gorobei/utils"
 	"os"
 )
 
@@ -14,22 +14,20 @@ func NewGorobeiPoster(cli *CLI) (*Gorobei, error) {
 		log.Error().Err(err).Msg("cannot open db")
 		return nil, err
 	}
-	tel, err := telego.NewBot(cli.Token)
+	tg, err := NewTelegram(cli.Token, db)
 	if err != nil {
-		db.Close()
+		err = db.Close()
 		return nil, err
 	}
 
 	g := &Gorobei{d: db,
-		bot: tel,
-		chat: cli.Chat,
-		admin: cli.Admin,
-		limiter: NewLimiter(),
-		adminLimiter: NewLimiter()}
+		tg: tg,
+		chat:         cli.Chat,
+		admin:        cli.Admin}
 
 	err = g.Init()
 	if err != nil {
-		db.Close()
+		err = db.Close()
 		return nil, err
 	}
 	return g, nil
@@ -46,10 +44,10 @@ func main() {
 		os.Exit(1)
 	}
 
-	log.Info().Str("token", ShortenString(cli.Token, 4, 4)).Str("chat", cli.Chat).
+	log.Info().Str("token", utils.ShortenString(cli.Token, 4, 4)).Str("chat", cli.Chat).
 		Int64("chat_id", g.chatId).
 		Int64("admin_id", g.adminId).
-		Msg("telegram bot info")
+		Msg("telegram Bot info")
 
 	switch cli.command {
 	case CmdFetch:
@@ -60,7 +58,7 @@ func main() {
 		}
 	case CmdSendMsg:
 		log.Info().Str("username", cli.SendMsg.Username).Str("message", cli.SendMsg.Message).Msg("send message command params")
-		err = g.SendMessage(cli.SendMsg.Username, 0, cli.SendMsg.Message, "", nil)
+		err = g.tg.SendMessage(cli.SendMsg.Username, 0, cli.SendMsg.Message, "")
 		if err != nil {
 			log.Error().Err(err).Msg("cannot send message")
 			os.Exit(1)
@@ -84,7 +82,7 @@ func main() {
 		}
 	case CmdSendImg:
 		log.Info().Str("user", cli.SendImg.Username).Str("caption", cli.SendImg.Caption).Str("path", cli.SendImg.ImagePath).Msg("send image params")
-		err = g.SendImage(cli.SendImg.Username, 0, cli.SendImg.ImagePath, cli.SendImg.Caption, nil)
+		err = g.tg.SendImage(cli.SendImg.Username, 0, cli.SendImg.ImagePath, cli.SendImg.Caption)
 		if err != nil {
 			log.Error().Err(err).Msg("cannot send image")
 			os.Exit(1)

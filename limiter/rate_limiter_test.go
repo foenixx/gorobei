@@ -1,24 +1,13 @@
-package main
+package limiter
 
 import (
+	"gorobei/clock"
 	"testing"
 	"time"
 )
 
-type TestClock struct {
-	tm time.Time
-}
-
-func (tc *TestClock) Now() time.Time {
-	return tc.tm
-}
-
-func (tc *TestClock) Add(d time.Duration) {
-	tc.tm = tc.tm.Add(d)
-}
-
 func Test_delayFunc(t *testing.T) {
-	initLog(false)
+	//main.initLog(false)
 	rl := NewLimiter().Init()
 	for i := 0; i <= 19; i++ {
 		t.Logf("Step %v: %v", i, rl.delayFunc(float64(i)))
@@ -26,7 +15,7 @@ func Test_delayFunc(t *testing.T) {
 }
 
 func Test_delayByCallNo(t *testing.T) {
-	initLog(false)
+	//main.initLog(false)
 	rl := NewLimiter().Init()
 	sum := 1.0
 	for i := 0; i <= 19; i++ {
@@ -38,9 +27,9 @@ func Test_delayByCallNo(t *testing.T) {
 }
 
 func Test_nextDelay(t *testing.T) {
-	initLog(false)
+	//main.initLog(false)
 	rl := NewLimiter()
-	tc := &TestClock{tm: time.Now()}
+	tc := &clock.TestClock{Tm: time.Now()}
 	rl.clock = tc
 	rl.Init()
 	for i := 0; i <= 100; i++ {
@@ -52,7 +41,7 @@ func Test_nextDelay(t *testing.T) {
 }
 
 func Test_TikTak(t *testing.T) {
-	initLog(false)
+	//main.initLog(false)
 	rl := NewLimiter().Init()
 
 	for i := 0; i <= 10; i++ {

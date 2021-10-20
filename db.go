@@ -1,19 +1,37 @@
 package main
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"github.com/dgraph-io/badger/v3"
 	"github.com/phuslu/log"
+	"gorobei/utils"
 	"strings"
+	"time"
 )
 
-type Db struct {
-	b *badger.DB
-}
+type (
+	Db struct {
+		b *badger.DB
+	}
+
+	DailyReport struct {
+		Posted int
+		Errors int
+		SentAt time.Time
+		Date time.Time // the day of the report
+	}
+
+	UsersStore interface {
+		StoreUserId(user string, id int64) error
+		ReadUserId(user string) (int64, error)
+	}
+)
 
 var (
 	ErrNotFound = errors.New("key not found")
+	_ UsersStore = (*Db)(nil)
 )
 
 var _ badger.Logger = (*LogAdapter)(nil)
@@ -40,7 +58,7 @@ func (d *Db) Close() error {
 	return d.b.Close()
 }
 
-func (d *Db) Get(key string) (byte, error) {
+func (d *Db) StoreUrlProcessed(key string) (byte, error) {
 	var v []byte
 
 	err := d.b.View(func(txn *badger.Txn) error {
@@ -64,7 +82,7 @@ func (d *Db) Get(key string) (byte, error) {
 	return v[0], nil
 }
 
-func (d *Db) Set(key string, value byte) error {
+func (d *Db) ReadUrlProcessed(key string, value byte) error {
 
 	err := d.b.Update(func(txn *badger.Txn) error {
 		err := txn.Set([]byte(key), []byte{value})
@@ -78,19 +96,19 @@ func (d *Db) constructUserKey(user string) []byte {
 	return []byte("username_" + strings.ToLower(user))
 }
 
-func (d *Db) SetUserID(user string, id int64) error {
+func (d *Db) StoreUserId(user string, id int64) error {
 	if user == "" {
 		return errors.New("empty user name")
 	}
 	err := d.b.Update(func(txn *badger.Txn) error {
-		err := txn.Set(d.constructUserKey(user), Int64ToByteArr(id))
+		err := txn.Set(d.constructUserKey(user), utils.Int64ToByteArr(id))
 		return err
 	})
 
 	return err
 }
 
-func (d *Db) GetUserID(user string) (int64, error) {
+func (d *Db) ReadUserId(user string) (int64, error) {
 	var v []byte
 
 	err := d.b.View(func(txn *badger.Txn) error {
@@ -108,9 +126,50 @@ func (d *Db) GetUserID(user string) (int64, error) {
 	if err != nil {
 		return 0, err
 	}
-	id, err := ByteArrToInt64(v)
+	id, err := utils.ByteArrToInt64(v)
 	if err != nil {
 		return 0, err
 	}
 	return id, nil
+}
+
+var dbKeyDailyReport = []byte("daily_report")
+
+func (d *Db) StoreDailyReport(r *DailyReport) error {
+	var err error
+	err = d.b.Update(func(txn *badger.Txn) error {
+		data, err := json.Marshal(r)
+		if err != nil {
+			return err
+		}
+		err = txn.Set(dbKeyDailyReport, data)
+		return err
+	})
+	return err
+}
+
+func (d *Db) ReadDailyReport() (*DailyReport, error) {
+	var er2 error
+	var r DailyReport
+
+	er2 = d.b.View(func(txn *badger.Txn) error {
+		item, err := txn.Get(dbKeyDailyReport)
+		if err != nil {
+			if errors.Is(err, badger.ErrKeyNotFound) {
+				return ErrNotFound
+			}
+			return err
+		}
+
+		err = item.Value(func(val []byte) error {
+			err := json.Unmarshal(val, &r)
+			return err
+		})
+		return err
+
+	})
+	if er2 != nil {
+		return nil, er2
+	}
+	return &r, nil
 }

@@ -6,43 +6,41 @@ import (
 	"fmt"
 	"github.com/mymmrac/telego"
 	"github.com/phuslu/log"
-	"os"
-	"strings"
-
+	"gorobei/clock"
 	"io/ioutil"
 	"mime"
 	"net/http"
+	"os"
 	"regexp"
 	"time"
 )
 
 type Gorobei struct {
 	d       *Db
-	bot     *telego.Bot
 	chat    string
 	chatId  int64
 	admin   string
 	adminId int64
-	limiter *RateLimiter
-	adminLimiter *RateLimiter
+	tg *Telegram
+	clock clock.Clock
 }
 
 var ErrImageAlreadyProcessed = errors.New("image has been processed already")
 
 func (g *Gorobei) Init() error {
 	params := &telego.GetChatParams{ChatID: telego.ChatID{Username: g.chat}}
-	chat, err := g.bot.GetChat(params)
+	chat, err := g.tg.Bot.GetChat(params)
 	if err != nil {
 		return err
 	}
 	g.chatId = chat.ID
-	err = g.processUpdates()
+	err = g.tg.DoUpdates()
 	if err != nil {
 		return err
 	}
 
 	if g.admin != "" {
-		g.adminId, err = g.d.GetUserID(g.admin)
+		g.adminId, err = g.d.ReadUserId(g.admin)
 		if err != nil {
 			if errors.Is(err, ErrNotFound) {
 				log.Error().Err(err).Msg("cannot obtain admin user ID. Admin notifications will be disabled.")
@@ -104,13 +102,37 @@ func (g *Gorobei) Fetch(url string, limit int) error {
 				break //for
 			}
 		} else {
-			log.Error().Str("src", m[0]).Msg("unexpected regex match")
+			log.Error().Str("src", m[0]).Msg("unexpected utils match")
 		}
 	}
+	if errc > 0 || (total - skipped) > 0 {
+		msg := fmt.Sprintf("Fetching images from the [page](%s) completed\\.\nTotal: %v\nNew: %v\nSkipped: %v\nErrors: %v", url, total, total-skipped, skipped, errc)
+		err = g.SendAdminMessage(msg)
+		return err
+	}
+	return nil
+}
 
-	msg := fmt.Sprintf("Fetching images from the [page](%s) completed\\.\nTotal: %v\nNew: %v\nSkipped: %v\nErrors: %v", url, total, total - skipped, skipped, errc)
-	err = g.SendAdminMessage(msg)
-	return err
+func (g *Gorobei) updateDailyReport(total, skipped, errc int) error {
+	r, err := g.d.ReadDailyReport()
+	if err != nil {
+		if errors.Is(err, ErrNotFound) {
+			// no report yet
+			r = &DailyReport{SentAt: g.clock.Now()}
+		} else {
+			return err
+		}
+	}
+	r.Posted += total - skipped
+	r.Errors += errc
+	d, m, h := r.SentAt.Date()
+	// daily reports are sent after 23:00
+	planned := time.Date(d,m,h, 23,0,0,0, time.Local)
+	if g.clock.Now().Sub(planned) > 0 {
+		// send report
+
+	}
+	return nil
 }
 
 var ImageExt = map[string]string{
@@ -153,7 +175,7 @@ func (g *Gorobei) downloadImage(src string) (string, error) {
 }
 
 func (g *Gorobei) processImage(src string) error {
-	done, err := g.d.Get(src)
+	done, err := g.d.StoreUrlProcessed(src)
 	if err != nil && !errors.Is(err, ErrNotFound) {
 		return err
 	}
@@ -166,91 +188,22 @@ func (g *Gorobei) processImage(src string) error {
 		return err
 	}
 	defer os.Remove(path)
-	err = g.SendChatImage(path, src)
+	err = g.SendChatImage(path, "")
 	if err != nil {
 		log.Error().Err(err).Msg("cannot send fetched image to the chat")
 		return err
 	}
-	err = g.d.Set(src, 1)
+	err = g.d.ReadUrlProcessed(src, 1)
 	return err
 
-}
-
-func (g *Gorobei) constructChatId(user string, userId int64) (*telego.ChatID, error) {
-	var chatId telego.ChatID
-	user = strings.ToLower(user)
-
-	switch {
-	case user == "":
-		chatId.ID = userId
-	case user[0] == '@':
-		//channel or group name
-		chatId.Username = user
-	default:
-		//ordinary user
-		id, err := g.d.GetUserID(user)
-		if errors.Is(err, ErrNotFound) {
-			return nil, fmt.Errorf("cannot find ID of the user '%s'. To enable bot to send messages to a user, the user should send '/start' message to the bot first", user)
-		}
-		if err != nil {
-			return nil, err
-		}
-		chatId.ID = id
-	}
-	return &chatId, nil
 }
 
 func (g *Gorobei) SendChatImage(image string, caption string) error {
-	return g.SendImage("", g.chatId, image, caption, nil)
-}
-
-func (g *Gorobei) SendImage(user string, userId int64, image string, caption string, limiter *RateLimiter) error {
-	if limiter == nil {
-		limiter = g.limiter
-	}
-	limiter.TikTak()
-	chatId, err := g.constructChatId(user, userId)
-	if err != nil {
-		return err
-	}
-	// Send using file from disk
-	//f, err := os.Open("/tmp/996584576.jpeg")
-	//f, err := os.Open("c:/personal/1430353161-0a6e350da88a8d827765cc8fe6dccd70.jpg")
-	f, err := os.Open(image)
-	if err != nil {
-		return err
-	}
-
-	params := &telego.SendPhotoParams{
-		ChatID:  *chatId,
-		Photo:   telego.InputFile{File: f},
-		Caption: caption,
-	}
-	_, err = g.bot.SendPhoto(params)
-	return err
-}
-
-func (g *Gorobei) SendMessage(user string, userID int64, message string, mode string, limiter *RateLimiter) error {
-	if limiter == nil {
-		limiter = g.limiter
-	}
-	limiter.TikTak()
-	chatId, err := g.constructChatId(user, userID)
-	if err != nil {
-		return err
-	}
-
-	params := &telego.SendMessageParams{
-		ChatID:    *chatId,
-		Text:      message,
-		ParseMode: mode,
-	}
-	_, err = g.bot.SendMessage(params)
-	return err
+	return g.tg.SendImage("", g.chatId, image, caption)
 }
 
 func (g *Gorobei) SendChatMessage(message string) error {
-	return g.SendMessage("", g.chatId, message, "", nil)
+	return g.tg.SendMessage("", g.chatId, message, "")
 }
 
 func (g *Gorobei) SendAdminMessage(message string) error {
@@ -258,40 +211,9 @@ func (g *Gorobei) SendAdminMessage(message string) error {
 		return nil
 	}
 
-	return g.SendMessage("", g.adminId, message, "MarkdownV2", g.adminLimiter)
-}
-// https://api.telegram.org/bot<TOKEN>/getUpdates
-//
-func (g *Gorobei) processUpdates() error {
-	var err error
-	var updates []telego.Update
-	params := &telego.GetUpdatesParams{
-		Timeout: 0,
-	}
-	updates, err = g.bot.GetUpdates(params)
-	if err != nil {
-		return err
-	}
-
-	for _, u := range updates {
-		if u.Message != nil {
-			uname := strings.ToLower(u.Message.Chat.Username)
-			_, err = g.d.GetUserID(uname)
-			if errors.Is(err, ErrNotFound) {
-				err = g.d.SetUserID(uname, u.Message.Chat.ID)
-				if err != nil {
-					return err
-				}
-				continue
-			}
-			if err != nil {
-				return err
-			}
-		}
-	}
-	return nil
+	return g.tg.SendMessage("", g.adminId, message, "MarkdownV2")
 }
 
 func (g *Gorobei) ForgetImg(url string) error {
-	return g.d.Set(url, 0)
+	return g.d.ReadUrlProcessed(url, 0)
 }

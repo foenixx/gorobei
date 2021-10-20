@@ -2,6 +2,7 @@ package main
 
 import (
 	"github.com/phuslu/log"
+	"os"
 )
 
 // LogAdapter struct
@@ -30,13 +31,14 @@ func (a *LogAdapter) Debugf(s string, i ...interface{}) {
 }
 
 func initLog(verbose bool) {
-	//if log.IsTerminal(os.Stderr.Fd()) {
 	w := &log.ConsoleWriter{
-		ColorOutput:    true,
+		//ColorOutput:    true,
 		QuoteString:    false,
 		EndWithMessage: false,
 	}
-	//}
+	if log.IsTerminal(os.Stderr.Fd()) {
+		w.ColorOutput = true
+	}
 	var lvl = log.InfoLevel
 	if verbose {
 		lvl = log.DebugLevel

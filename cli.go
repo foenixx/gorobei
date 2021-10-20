@@ -16,9 +16,9 @@ const (
 )
 
 type CLI struct {
-	Admin   string `help:"Admin user. The bot notifies admin about errors if this option is set."`
+	Admin   string `help:"Admin user. The Bot notifies admin about errors if this option is set."`
 	Chat    string `help:"Chat name." default:"@gorobei_posts"`
-	Token   string `help:"Telegram bot token." env:"GOROBEI_BOT_TOKEN"`
+	Token   string `help:"Telegram Bot token." env:"GOROBEI_BOT_TOKEN"`
 	Verbose bool   `help:"Print verbose logs."`
 	Fetch   struct {
 		Limit int    `help:"Stop after processing of '--limit' number of items. Default is 0 which means process all images."`

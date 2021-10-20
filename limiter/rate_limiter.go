@@ -1,8 +1,9 @@
-package main
+package limiter
 
 import (
 	"math"
 	"time"
+	"gorobei/clock"
 )
 
 // RateLimiter implements telegram message limits:
@@ -16,21 +17,9 @@ type (
 		calls     int
 		firstCall time.Time
 		delayFunc func(calls float64) float64
-		clock 	Clock
-	}
-
-	Clock interface {
-		Now() time.Time
-	}
-
-	RealClock struct {
-
+		clock     clock.Clock
 	}
 )
-
-func (r *RealClock) Now() time.Time {
-	return time.Now()
-}
 
 const (
 	MaxRatePerMinute = 20.0
@@ -39,9 +28,9 @@ const (
 
 func NewLimiter() *RateLimiter {
 	l := &RateLimiter{
-		maxRpm:    MaxRatePerMinute,
-		maxRps:    MaxRatePerSecond,
-		clock: &RealClock{},
+		maxRpm: MaxRatePerMinute,
+		maxRps: MaxRatePerSecond,
+		clock:  &clock.RealClock{},
 	}
 	// https://www.wolframalpha.com/input/?i=plot+e%5E%28x%2F%2819%2F5%29%29-1+from+x%3D0+to+19
 	// scale f=(e^x-1), x=[0..5] to the x=[0..maxRpm-1] which is e^(x/(maxRpm-1)/5)-1
