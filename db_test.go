@@ -62,8 +62,8 @@ func TestDb_DailyReport(t *testing.T) {
 	r := DailyReport{
 		Posted: 100,
 		Errors: 1,
+		Total: 170,
 		SentAt: tm,
-		Date:   tm,
 	}
 	_, err := d.ReadDailyReport()
 	require.ErrorIs(t, ErrNotFound, err)

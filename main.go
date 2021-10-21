@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"github.com/phuslu/log"
 	"gorobei/utils"
 	"os"
@@ -54,11 +55,13 @@ func main() {
 		err = g.Fetch(cli.Fetch.Url, cli.Fetch.Limit)
 		if err != nil {
 			log.Error().Err(err).Msg("cannot retrieve page content")
+			// try to notify an admin
+			_ = g.SendAdminMessage(fmt.Sprintf("Cannot get page content!\n[link](%s)\n\n__error__:\n```\n%s\n```", cli.Fetch.Url, err.Error()))
 			os.Exit(1)
 		}
 	case CmdSendMsg:
 		log.Info().Str("username", cli.SendMsg.Username).Str("message", cli.SendMsg.Message).Msg("send message command params")
-		err = g.tg.SendMessage(cli.SendMsg.Username, 0, cli.SendMsg.Message, "")
+		err = g.tg.SendMessageText(cli.SendMsg.Username, 0, cli.SendMsg.Message)
 		if err != nil {
 			log.Error().Err(err).Msg("cannot send message")
 			os.Exit(1)
@@ -107,3 +110,23 @@ func main() {
 		os.Exit(1)
 	}
 }
+
+var testMessageText = utils.Bt(`
+Message header!
+_Line_ *with* __inline__ ~markup~.
+{Line}+(with)-[special]=#symbols.
+
+[image](https://i.imgur.com/sMhpFyR.jpg)
+
+__error__:
+³³³
+not enough arguments, expected at least 3, got 0
+main.parseArgs
+        /home/dfc/src/github.com/pkg/errors/_examples/wrap/main.go:12
+main.main
+        /home/dfc/src/github.com/pkg/errors/_examples/wrap/main.go:18
+runtime.main
+        /home/dfc/go/src/runtime/proc.go:183
+runtime.goexit
+        /home/dfc/go/src/runtime/asm_amd64.s:2059
+³³³`)

@@ -17,10 +17,11 @@ type (
 	}
 
 	DailyReport struct {
+		Run    int
 		Posted int
 		Errors int
+		Total int
 		SentAt time.Time
-		Date time.Time // the day of the report
 	}
 
 	UsersStore interface {

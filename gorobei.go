@@ -4,9 +4,9 @@ import (
 	"bufio"
 	"errors"
 	"fmt"
-	"github.com/mymmrac/telego"
 	"github.com/phuslu/log"
 	"gorobei/clock"
+	"gorobei/utils"
 	"io/ioutil"
 	"mime"
 	"net/http"
@@ -21,15 +21,14 @@ type Gorobei struct {
 	chatId  int64
 	admin   string
 	adminId int64
-	tg *Telegram
+	tg Telegram
 	clock clock.Clock
 }
 
 var ErrImageAlreadyProcessed = errors.New("image has been processed already")
 
 func (g *Gorobei) Init() error {
-	params := &telego.GetChatParams{ChatID: telego.ChatID{Username: g.chat}}
-	chat, err := g.tg.Bot.GetChat(params)
+	chat, err := g.tg.ChatInfo(g.chat)
 	if err != nil {
 		return err
 	}
@@ -59,21 +58,25 @@ func (g *Gorobei) Close() error {
 	return nil
 }
 
+
 func (g *Gorobei) Fetch(url string, limit int) error {
 	client := http.Client{
-		Timeout: 5 * time.Second,
+		Timeout: 15 * time.Second,
 	}
 	resp, err := client.Get(url)
 	if err != nil {
 		return err
 	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return utils.HttpResponseError(resp)
+	}
 
 	body, err := ioutil.ReadAll(resp.Body)
-	resp.Body.Close()
 	if err != nil {
 		return err
 	}
-	//log.Info().Msg(string(body))
 
 	re := regexp.MustCompile(`(?si)<div class="singlePost.*?<div class="postInner">\s*?<div class="paragraph">[^<]*<div[^<]*<img src=["']{1}(.*?)["']{1}`)
 	ma := re.FindAllStringSubmatch(string(body), -1)
@@ -89,7 +92,7 @@ func (g *Gorobei) Fetch(url string, limit int) error {
 				} else {
 					errc += 1
 					log.Error().Err(err).Str("src", src).Msg("cannot process image")
-					msg := fmt.Sprintf("Error occured during processing the image\\!\n[image](%s)\n\n__error__:\n```\n%s\n```", src, err.Error())
+					msg := fmt.Sprintf("Error occured during processing the image!\n[image](%s)\n\n__error__:\n```\n%s\n```", src, err.Error())
 					err2 := g.SendAdminMessage(msg)
 					if err2 != nil {
 						log.Error().Err(err2).Msg("cannot send admin message")
@@ -106,7 +109,7 @@ func (g *Gorobei) Fetch(url string, limit int) error {
 		}
 	}
 	if errc > 0 || (total - skipped) > 0 {
-		msg := fmt.Sprintf("Fetching images from the [page](%s) completed\\.\nTotal: %v\nNew: %v\nSkipped: %v\nErrors: %v", url, total, total-skipped, skipped, errc)
+		msg := fmt.Sprintf("Fetching images from the [page](%s) completed.\nTotal: %v\nNew: %v\nSkipped: %v\nErrors: %v", url, total, total-skipped, skipped, errc)
 		err = g.SendAdminMessage(msg)
 		return err
 	}
@@ -124,15 +127,32 @@ func (g *Gorobei) updateDailyReport(total, skipped, errc int) error {
 		}
 	}
 	r.Posted += total - skipped
-	r.Errors += errc
-	d, m, h := r.SentAt.Date()
+	r.Errors = errc
+	r.Total = total
+	r.Run += 1
+	y, m, d := r.SentAt.Date()
 	// daily reports are sent after 23:00
-	planned := time.Date(d,m,h, 23,0,0,0, time.Local)
+	planned := time.Date(y,m,d, 23,0,0,0, r.SentAt.Location())
+
 	if g.clock.Now().Sub(planned) > 0 {
 		// send report
+		msg := utils.Bt(
+			`*Daily report.*
 
+The bot has run %v times.
+New images posted: %v
+Images found (during last run): %v
+Errors (during last run): %v`)
+		err = g.SendAdminMessage(fmt.Sprintf(msg, r.Run, r.Posted, r.Total, r.Errors))
+		if err != nil {
+			return err
+		}
+		r.Run = 0
+		r.Posted = 0
+		r.SentAt = g.clock.Now()
 	}
-	return nil
+
+	return g.d.StoreDailyReport(r)
 }
 
 var ImageExt = map[string]string{
@@ -154,6 +174,11 @@ func (g *Gorobei) downloadImage(src string) (string, error) {
 		return "", err
 	}
 	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return "", utils.HttpResponseError(resp)
+	}
+
 	var mediatype string
 	mediatype, _, err = mime.ParseMediaType(resp.Header.Get("Content-Type"))
 	if err != nil {
@@ -203,7 +228,7 @@ func (g *Gorobei) SendChatImage(image string, caption string) error {
 }
 
 func (g *Gorobei) SendChatMessage(message string) error {
-	return g.tg.SendMessage("", g.chatId, message, "")
+	return g.tg.SendMessageText("", g.chatId, message)
 }
 
 func (g *Gorobei) SendAdminMessage(message string) error {
@@ -211,7 +236,7 @@ func (g *Gorobei) SendAdminMessage(message string) error {
 		return nil
 	}
 
-	return g.tg.SendMessage("", g.adminId, message, "MarkdownV2")
+	return g.tg.SendMessageMarkdown("", g.adminId, message)
 }
 
 func (g *Gorobei) ForgetImg(url string) error {

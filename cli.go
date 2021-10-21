@@ -72,9 +72,9 @@ func cliParse() *CLI {
 		cli.command = CmdSendChatImg
 	case strings.HasPrefix(k.Command(), CmdSendAdminMsg):
 		cli.command = CmdSendAdminMsg
-		if cli.SendChatMsg.Message == "" {
+		if cli.SendAdminMsg.Message == "" {
 			//test message
-			cli.SendAdminMsg.Message = "message line1\nline2\nline3\n[image](https://i.imgur.com/sMhpFyR.jpg)\n\n__error:__\n```\nerror line1\nline2```"
+			cli.SendAdminMsg.Message = testMessageText
 		}
 	case strings.HasPrefix(k.Command(), CmdForgetImg):
 		cli.command = CmdForgetImg

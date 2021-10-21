@@ -12,18 +12,29 @@ import (
 	"strings"
 )
 
-type Telegram struct {
-	Bot   *telego.Bot
-	store UsersStore
-	limiters map[string]*limiter.RateLimiter // key = channel_name or string(chat_id)
-}
+type (
+	Telegram interface {
+		SendImage(user string, userId int64, image string, caption string) error
+		SendMessageMarkdown(user string, userId int64, message string) error
+		SendMessageText(user string, userId int64, message string) error
+		DoUpdates() error
+		ChatInfo(string) (*telego.Chat, error)
+	}
+	telegramImpl struct {
+		Bot      *telego.Bot
+		store    UsersStore
+		limiters map[string]*limiter.RateLimiter // key = channel_name or string(chat_id)
+	}
+)
 
-func NewTelegram(token string, store UsersStore) (*Telegram, error) {
+var _ Telegram = (*telegramImpl)(nil)
+
+func NewTelegram(token string, store UsersStore) (Telegram, error) {
 	bot, err := telego.NewBot(token)
 	if err != nil {
 		return nil, err
 	}
-	var tg = Telegram{
+	var tg = telegramImpl{
 		Bot:      bot,
 		store:    store,
 		limiters: make(map[string]*limiter.RateLimiter),
@@ -31,7 +42,7 @@ func NewTelegram(token string, store UsersStore) (*Telegram, error) {
 	return &tg, nil
 }
 
-func (tg *Telegram) SendImage(user string, userId int64, image string, caption string) error {
+func (tg *telegramImpl) SendImage(user string, userId int64, image string, caption string) error {
 	chatId, err := tg.constructChatId(user, userId)
 	if err != nil {
 		return err
@@ -53,7 +64,7 @@ func (tg *Telegram) SendImage(user string, userId int64, image string, caption s
 	return err
 }
 
-func (tg *Telegram) getLimiter(id *telego.ChatID) *limiter.RateLimiter {
+func (tg *telegramImpl) getLimiter(id *telego.ChatID) *limiter.RateLimiter {
 	var key string
 	if id.ID != 0 {
 		key = fmt.Sprintf("%v", id.ID)
@@ -72,7 +83,16 @@ func (tg *Telegram) getLimiter(id *telego.ChatID) *limiter.RateLimiter {
 	return l
 }
 
-func (tg *Telegram) SendMessage(user string, userId int64, message string, mode string) error {
+func (tg *telegramImpl) SendMessageMarkdown(user string, userId int64, message string) error {
+	message = EscapeMarkdown(message)
+	return tg.sendMessage(user, userId, message, "MarkdownV2")
+}
+
+func (tg *telegramImpl) SendMessageText(user string, userId int64, message string) error {
+	return tg.sendMessage(user, userId, message, "")
+}
+
+func (tg *telegramImpl) sendMessage(user string, userId int64, message string, mode string) error {
 	chatId, err := tg.constructChatId(user, userId)
 	if err != nil {
 		return err
@@ -89,7 +109,7 @@ func (tg *Telegram) SendMessage(user string, userId int64, message string, mode 
 	return err
 }
 
-func (tg *Telegram) constructChatId(user string, userId int64) (*telego.ChatID, error) {
+func (tg *telegramImpl) constructChatId(user string, userId int64) (*telego.ChatID, error) {
 	var chatId telego.ChatID
 	user = strings.ToLower(user)
 
@@ -115,7 +135,7 @@ func (tg *Telegram) constructChatId(user string, userId int64) (*telego.ChatID, 
 
 // https://api.telegram.org/bot<TOKEN>/getUpdates
 //
-func (tg *Telegram) DoUpdates() error {
+func (tg *telegramImpl) DoUpdates() error {
 	var err error
 	var updates []telego.Update
 	params := &telego.GetUpdatesParams{
@@ -145,14 +165,46 @@ func (tg *Telegram) DoUpdates() error {
 	return nil
 }
 
+func (tg *telegramImpl) ChatInfo(name string) (*telego.Chat, error) {
+	params := &telego.GetChatParams{ChatID: telego.ChatID{Username: name}}
+	return tg.Bot.GetChat(params)
+}
+
 var (
-	rePre = regexp.MustCompile(`(?ms)^\x60{3}\S*\n(.*?)\n\x60{3}`)
-	reInlineCode= regexp.MustCompile(`\x60(.*?)\x60`)
-	reLink= regexp.MustCompile(`\[.+?]\((.+?)\)`)
-	reOthers = regexp.MustCompile(`[_*[\]()~\x60>#+-=|{}.!]`)
+	rePre        = regexp.MustCompile(`(?ms)^\x60{3}\S*\n(.*?)\n\x60{3}`)
+	reInlineCode = regexp.MustCompile(`\x60(.*?)\x60`)
+	reLink       = regexp.MustCompile(`\[.+?]\((.+?)\)`)
+	reOthers     = regexp.MustCompile(`[[\]()\x60>#+\-=|{}.!\\]`)
 )
 
-func replOthers(i []byte) []byte {
+func replacePreInside(g [][]byte) [][]byte {
+	g[0] = replaceSlashBacktick(g[0])
+	return g
+}
+func replaceSlashBacktick(s []byte) []byte {
+	res := strings.ReplaceAll(string(s), `\`, `\\`)
+	return []byte(strings.ReplaceAll(res, "`", "\\`"))
+}
+
+func replacePreOutside(s []byte) []byte {
+	return utils.ReplaceAllSubmatchFunc2(reInlineCode, s, replaceInlineCodeInside, replaceInlineCodeOutside, -1)
+}
+
+func replaceInlineCodeInside(g [][]byte) [][]byte {
+	g[0] = replaceSlashBacktick(g[0])
+	return g
+}
+
+func replaceInlineCodeOutside(s []byte) []byte {
+	return utils.ReplaceAllSubmatchFunc2(reLink, s, replaceLinkInside, replaceAllChars, -1)
+}
+
+func replaceLinkInside(g [][]byte) [][]byte {
+	g[0] = replaceSlashBacktick(g[0])
+	return g
+}
+
+func replaceAllChars(i []byte) []byte {
 	return []byte(reOthers.ReplaceAllString(string(i), `\$0`))
 }
 
@@ -161,24 +213,6 @@ func replOthers(i []byte) []byte {
 // Inside (...) part of inline link definition, all ')' and '\' must be escaped with a preceding '\' character.
 // In all other places characters '_', '*', '[', ']', '(', ')', '~', '`', '>', '#', '+', '-', '=', '|', '{', '}', '.', '!' must be escaped with the preceding character '\'.
 func EscapeMarkdown(msg string) string {
-	replPre := func(i [][]byte) [][]byte{
-		s := strings.ReplaceAll(string(i[0]), `\`, `\\`)
-		s = strings.ReplaceAll(s, "`", "\\`")
-		i[0] = []byte(s)
-		return i
-	}
-	replNotPre := func(s []byte) []byte{
-		res := utils.ReplaceAllSubmatchFunc(reInlineCode, s, func(i [][]byte) [][]byte {
-			i[0] = []byte(strings.ReplaceAll(string(i[0]), `\`, `\\`))
-			return i
-		}, -1)
-		res = utils.ReplaceAllSubmatchFunc(reLink, res, func(i [][]byte) [][]byte {
-			i[0] = []byte(strings.ReplaceAll(string(i[0]), `\`, `\\`))
-			return i
-		}, -1)
-		return res
-	}
-
-	res := utils.ReplaceAllSubmatchFunc2(rePre, []byte(msg), replPre, replNotPre, -1)
+	res := utils.ReplaceAllSubmatchFunc2(rePre, []byte(msg), replacePreInside, replacePreOutside, -1)
 	return string(res)
 }
