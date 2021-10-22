@@ -21,6 +21,7 @@ type (
 		Posted int
 		Errors int
 		Total int
+		LastError string
 		SentAt time.Time
 	}
 

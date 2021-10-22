@@ -70,7 +70,13 @@ func (g *Gorobei) Fetch(url string, limit int) error {
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return utils.HttpResponseError(resp)
+		er2 := utils.HttpResponseError(resp)
+		err = g.updateDailyReport(0,0,0, er2.Error())
+		if err != nil {
+			log.Error().Err(err).Msg("cannot update daily report")
+		}
+		// return http error, possible updateDailyReport errors are just logged
+		return er2
 	}
 
 	body, err := ioutil.ReadAll(resp.Body)
@@ -80,7 +86,11 @@ func (g *Gorobei) Fetch(url string, limit int) error {
 
 	re := regexp.MustCompile(`(?si)<div class="singlePost.*?<div class="postInner">\s*?<div class="paragraph">[^<]*<div[^<]*<img src=["']{1}(.*?)["']{1}`)
 	ma := re.FindAllStringSubmatch(string(body), -1)
-	var total,skipped, errc int
+
+	var (
+		total,skipped, errc int
+		lastError string
+	)
 	for _, m := range ma {
 		if len(m) == 2 && m[1] != `https://i.imgur.com/sMhpFyR.jpg` {
 			src := m[1]
@@ -90,6 +100,7 @@ func (g *Gorobei) Fetch(url string, limit int) error {
 				if errors.Is(err, ErrImageAlreadyProcessed) {
 					skipped += 1
 				} else {
+					lastError = err.Error()
 					errc += 1
 					log.Error().Err(err).Str("src", src).Msg("cannot process image")
 					msg := fmt.Sprintf("Error occured during processing the image!\n[image](%s)\n\n__error__:\n```\n%s\n```", src, err.Error())
@@ -105,9 +116,15 @@ func (g *Gorobei) Fetch(url string, limit int) error {
 				break //for
 			}
 		} else {
-			log.Error().Str("src", m[0]).Msg("unexpected utils match")
+			log.Error().Str("src", m[0]).Msg("unexpected match")
 		}
 	}
+	// update and send daily report, errors are just logged
+	err = g.updateDailyReport(total,skipped,errc, lastError)
+	if err != nil {
+		log.Error().Err(err).Msg("cannot update daily report")
+	}
+	// notify admin about errors or new images posted
 	if errc > 0 || (total - skipped) > 0 {
 		msg := fmt.Sprintf("Fetching images from the [page](%s) completed.\nTotal: %v\nNew: %v\nSkipped: %v\nErrors: %v", url, total, total-skipped, skipped, errc)
 		err = g.SendAdminMessage(msg)
@@ -116,7 +133,7 @@ func (g *Gorobei) Fetch(url string, limit int) error {
 	return nil
 }
 
-func (g *Gorobei) updateDailyReport(total, skipped, errc int) error {
+func (g *Gorobei) updateDailyReport(total, skipped, errc int, lastError string) error {
 	r, err := g.d.ReadDailyReport()
 	if err != nil {
 		if errors.Is(err, ErrNotFound) {
@@ -129,6 +146,7 @@ func (g *Gorobei) updateDailyReport(total, skipped, errc int) error {
 	r.Posted += total - skipped
 	r.Errors = errc
 	r.Total = total
+	r.LastError = lastError
 	r.Run += 1
 	y, m, d := r.SentAt.Date()
 	// daily reports are sent after 23:00
