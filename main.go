@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"github.com/phuslu/log"
+	"gorobei/clock"
 	"gorobei/utils"
 	"os"
 )
@@ -23,8 +24,10 @@ func NewGorobeiPoster(cli *CLI) (*Gorobei, error) {
 
 	g := &Gorobei{d: db,
 		tg: tg,
+		fetcher: &httpFetcherImpl{},
 		chat:         cli.Chat,
-		admin:        cli.Admin}
+		admin:        cli.Admin,
+		clock: &clock.RealClock{}}
 
 	err = g.Init()
 	if err != nil {
@@ -32,6 +35,14 @@ func NewGorobeiPoster(cli *CLI) (*Gorobei, error) {
 		return nil, err
 	}
 	return g, nil
+}
+
+func must(err error, msg string) {
+	if err == nil {
+		return
+	}
+	log.Error().Err(err).Msg(msg)
+	os.Exit(1)
 }
 
 func main() {
@@ -62,71 +73,43 @@ func main() {
 	case CmdSendMsg:
 		log.Info().Str("username", cli.SendMsg.Username).Str("message", cli.SendMsg.Message).Msg("send message command params")
 		err = g.tg.SendMessageText(cli.SendMsg.Username, 0, cli.SendMsg.Message)
-		if err != nil {
-			log.Error().Err(err).Msg("cannot send message")
-			os.Exit(1)
-		}
+		must(err, "cannot send message")
 	case CmdSendChatMsg:
 		log.Info().Str("message", cli.SendChatMsg.Message).Msg("send chat message command params")
 		err = g.SendChatMessage(cli.SendChatMsg.Message)
-		if err != nil {
-			log.Error().Err(err).Msg("cannot send default chat message")
-			os.Exit(1)
-		}
+		must(err, "cannot send default chat message")
 	case CmdSendAdminMsg:
 		log.Info().Str("message", cli.SendAdminMsg.Message).Msg("send admin message params")
 		if g.admin == "" {
 			log.Error().Msg("no admin specified")
 		}
 		err = g.SendAdminMessage(cli.SendAdminMsg.Message)
-		if err != nil {
-			log.Error().Err(err).Msg("cannot send admin message")
-			os.Exit(1)
-		}
+		must(err, "cannot send admin message")
 	case CmdSendImg:
 		log.Info().Str("user", cli.SendImg.Username).Str("caption", cli.SendImg.Caption).Str("path", cli.SendImg.ImagePath).Msg("send image params")
 		err = g.tg.SendImage(cli.SendImg.Username, 0, cli.SendImg.ImagePath, cli.SendImg.Caption)
-		if err != nil {
-			log.Error().Err(err).Msg("cannot send image")
-			os.Exit(1)
-		}
+		must(err, "cannot send image")
 	case CmdSendChatImg:
 		log.Info().Str("chat", cli.Chat).Str("caption", cli.SendChatImg.Caption).Str("path", cli.SendChatImg.ImagePath).Msg("send chat image params")
 		err = g.SendChatImage(cli.SendChatImg.ImagePath, cli.SendChatImg.Caption)
-		if err != nil {
-			log.Error().Err(err).Msg("cannot send image to default chat")
-			os.Exit(1)
-		}
+		must(err, "cannot send image to default chat")
 	case CmdForgetImg:
 		log.Info().Str("url", cli.ForgetImg.Url).Msg("forget image params")
 		err = g.ForgetImg(cli.ForgetImg.Url)
-		if err != nil {
-			log.Error().Err(err).Msg("cannot forget image")
-			os.Exit(1)
+		must(err, "cannot forget image")
+	case CmdReport:
+		log.Info().Msg("send report to admin")
+		var r *DailyReport
+		r, err = g.ReadOrCreateDailyReport()
+		must(err, "cannot read daily report")
+		if g.admin == "" {
+			log.Error().Msg("no admin specified")
 		}
-
+		err = g.SendAdminMessage(g.FormatDailyReport(r))
+		must(err, "cannot read daily report")
 	default:
 		log.Error().Msg("invalid command")
 		os.Exit(1)
 	}
 }
 
-var testMessageText = utils.Bt(`
-Message header!
-_Line_ *with* __inline__ ~markup~.
-{Line}+(with)-[special]=#symbols.
-
-[image](https://i.imgur.com/sMhpFyR.jpg)
-
-__error__:
-³³³
-not enough arguments, expected at least 3, got 0
-main.parseArgs
-        /home/dfc/src/github.com/pkg/errors/_examples/wrap/main.go:12
-main.main
-        /home/dfc/src/github.com/pkg/errors/_examples/wrap/main.go:18
-runtime.main
-        /home/dfc/go/src/runtime/proc.go:183
-runtime.goexit
-        /home/dfc/go/src/runtime/asm_amd64.s:2059
-³³³`)

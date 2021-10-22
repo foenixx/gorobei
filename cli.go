@@ -13,6 +13,7 @@ const (
 	CmdSendChatImg  = "send-chat-img"
 	CmdSendAdminMsg = "send-admin-msg"
 	CmdForgetImg    = "forget-img"
+	CmdReport		= "report"
 )
 
 type CLI struct {
@@ -45,7 +46,9 @@ type CLI struct {
 	} `cmd:"" help:"Send message to admin. '--admin' argument should be specified."`
 	ForgetImg struct {
 		Url string `arg:"" required:"" help:"Image url."`
-	} `cmd:"" help:"Remove image url from internal db. Next time image's gonna be processed as new one.'"`
+	} `cmd:"" help:"Remove image url from internal db. Next time image's gonna be processed as new one."`
+	Report struct {
+	} `cmd:"" help:"Send daily report to the administrator."`
 	command string `-`
 }
 
@@ -78,6 +81,8 @@ func cliParse() *CLI {
 		}
 	case strings.HasPrefix(k.Command(), CmdForgetImg):
 		cli.command = CmdForgetImg
+	case strings.HasPrefix(k.Command(), CmdReport):
+		cli.command = CmdReport
 	default:
 		cli.command = "not specified"
 	}

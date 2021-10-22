@@ -1,15 +1,11 @@
 package main
 
 import (
-	"bufio"
 	"errors"
 	"fmt"
 	"github.com/phuslu/log"
 	"gorobei/clock"
 	"gorobei/utils"
-	"io/ioutil"
-	"mime"
-	"net/http"
 	"os"
 	"regexp"
 	"time"
@@ -21,8 +17,9 @@ type Gorobei struct {
 	chatId  int64
 	admin   string
 	adminId int64
-	tg Telegram
-	clock clock.Clock
+	tg      Telegram
+	clock   clock.Clock
+	fetcher HttpFetcher
 }
 
 var ErrImageAlreadyProcessed = errors.New("image has been processed already")
@@ -58,29 +55,16 @@ func (g *Gorobei) Close() error {
 	return nil
 }
 
-
 func (g *Gorobei) Fetch(url string, limit int) error {
-	client := http.Client{
-		Timeout: 15 * time.Second,
-	}
-	resp, err := client.Get(url)
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
+	body, err := g.fetcher.FetchHtml(url)
 
-	if resp.StatusCode != http.StatusOK {
-		er2 := utils.HttpResponseError(resp)
-		err = g.updateDailyReport(0,0,0, er2.Error())
-		if err != nil {
-			log.Error().Err(err).Msg("cannot update daily report")
+	if err != nil {
+		log.Error().Err(err).Msg("cannot fetch page content")
+		er2 := g.UpdateAndSendDailyReport(0, 0, 0, err.Error())
+		if er2 != nil {
+			// return http error, possible UpdateAndSendDailyReport errors are just logged
+			log.Error().Err(er2).Msg("cannot update daily report")
 		}
-		// return http error, possible updateDailyReport errors are just logged
-		return er2
-	}
-
-	body, err := ioutil.ReadAll(resp.Body)
-	if err != nil {
 		return err
 	}
 
@@ -88,8 +72,8 @@ func (g *Gorobei) Fetch(url string, limit int) error {
 	ma := re.FindAllStringSubmatch(string(body), -1)
 
 	var (
-		total,skipped, errc int
-		lastError string
+		total, skipped, errc int
+		lastError            string
 	)
 	for _, m := range ma {
 		if len(m) == 2 && m[1] != `https://i.imgur.com/sMhpFyR.jpg` {
@@ -120,12 +104,12 @@ func (g *Gorobei) Fetch(url string, limit int) error {
 		}
 	}
 	// update and send daily report, errors are just logged
-	err = g.updateDailyReport(total,skipped,errc, lastError)
+	err = g.UpdateAndSendDailyReport(total, skipped, errc, lastError)
 	if err != nil {
 		log.Error().Err(err).Msg("cannot update daily report")
 	}
 	// notify admin about errors or new images posted
-	if errc > 0 || (total - skipped) > 0 {
+	if errc > 0 || (total-skipped) > 0 {
 		msg := fmt.Sprintf("Fetching images from the [page](%s) completed.\nTotal: %v\nNew: %v\nSkipped: %v\nErrors: %v", url, total, total-skipped, skipped, errc)
 		err = g.SendAdminMessage(msg)
 		return err
@@ -133,15 +117,37 @@ func (g *Gorobei) Fetch(url string, limit int) error {
 	return nil
 }
 
-func (g *Gorobei) updateDailyReport(total, skipped, errc int, lastError string) error {
+func (g *Gorobei) FormatDailyReport(r *DailyReport) string {
+	msg := utils.Bt(
+		`*Daily report.*
+
+The bot has run *%v* times.
+New images posted: *%v*
+Images found (during last run): *%v*
+Errors (during last run): *%v*
+Last error:
+³³³
+%v
+³³³`)
+	return fmt.Sprintf(msg, r.Run, r.Posted, r.Total, r.Errors, r.LastError)
+}
+
+func (g *Gorobei) ReadOrCreateDailyReport() (*DailyReport, error) {
 	r, err := g.d.ReadDailyReport()
 	if err != nil {
 		if errors.Is(err, ErrNotFound) {
 			// no report yet
-			r = &DailyReport{SentAt: g.clock.Now()}
-		} else {
-			return err
+			return &DailyReport{SentAt: g.clock.Now()}, nil
 		}
+		return nil, err
+	}
+	return r, nil
+}
+
+func (g *Gorobei) UpdateAndSendDailyReport(total, skipped, errc int, lastError string) error {
+	r, err := g.ReadOrCreateDailyReport()
+	if err != nil {
+		return err
 	}
 	r.Posted += total - skipped
 	r.Errors = errc
@@ -150,71 +156,29 @@ func (g *Gorobei) updateDailyReport(total, skipped, errc int, lastError string) 
 	r.Run += 1
 	y, m, d := r.SentAt.Date()
 	// daily reports are sent after 23:00
-	planned := time.Date(y,m,d, 23,0,0,0, r.SentAt.Location())
+	planned := time.Date(y, m, d, 23, 0, 0, 0, r.SentAt.Location())
 
-	if g.clock.Now().Sub(planned) > 0 {
-		// send report
-		msg := utils.Bt(
-			`*Daily report.*
-
-The bot has run %v times.
-New images posted: %v
-Images found (during last run): %v
-Errors (during last run): %v`)
-		err = g.SendAdminMessage(fmt.Sprintf(msg, r.Run, r.Posted, r.Total, r.Errors))
-		if err != nil {
-			return err
-		}
-		r.Run = 0
-		r.Posted = 0
-		r.SentAt = g.clock.Now()
+	err = g.d.StoreDailyReport(r)
+	if err != nil {
+		return err
 	}
 
+	// if Now() <= planned send date?
+	if g.clock.Now().Sub(planned) <= 0 {
+		// don't send report
+		return nil
+	}
+
+	// send report
+	err = g.SendAdminMessage(g.FormatDailyReport(r))
+	if err != nil {
+		return err
+	}
+	r.Run = 0
+	r.Posted = 0
+	r.SentAt = g.clock.Now()
 	return g.d.StoreDailyReport(r)
-}
 
-var ImageExt = map[string]string{
-	"image/bmp":     "bmp",
-	"image/gif":     "gif",
-	"image/jpeg":    "jpeg",
-	"image/png":     "png",
-	"image/svg+xml": "svg",
-	"image/tiff":    "tiff",
-	"image/webp":    "webp",
-}
-
-func (g *Gorobei) downloadImage(src string) (string, error) {
-	client := http.Client{
-		Timeout: 15 * time.Second,
-	}
-	resp, err := client.Get(src)
-	if err != nil {
-		return "", err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return "", utils.HttpResponseError(resp)
-	}
-
-	var mediatype string
-	mediatype, _, err = mime.ParseMediaType(resp.Header.Get("Content-Type"))
-	if err != nil {
-		return "", err
-	}
-	ext, ok := ImageExt[mediatype]
-	if !ok {
-		return "", fmt.Errorf("unsupported mediatype: %s", mediatype)
-	}
-	f, err := ioutil.TempFile("", "*."+ext)
-	defer f.Close()
-	log.Info().Str("file", f.Name()).Msg("image temp file name")
-	r := bufio.NewReader(resp.Body)
-	_, err = r.WriteTo(f)
-	if err != nil {
-		return "", err
-	}
-	return f.Name(), nil
 }
 
 func (g *Gorobei) processImage(src string) error {
@@ -226,7 +190,7 @@ func (g *Gorobei) processImage(src string) error {
 		log.Info().Str("src", src).Msg("image has been processed already")
 		return ErrImageAlreadyProcessed
 	}
-	path, err := g.downloadImage(src)
+	path, err := g.fetcher.FetchImage(src)
 	if err != nil {
 		return err
 	}

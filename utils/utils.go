@@ -4,9 +4,6 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
-	"io/ioutil"
-	"mime"
-	"net/http"
 	"strings"
 	"unicode/utf8"
 )
@@ -70,25 +67,4 @@ func ByteArrToInt64(v []byte) (int64, error) {
 		return 0, errors.New("input array has wrong length")
 	}
 	return int64(binary.LittleEndian.Uint64(v)), nil
-}
-
-func HttpResponseError(resp *http.Response) error {
-	var mediatype string
-	ctype := resp.Header.Get("Content-Type")
-	mediatype, _, err := mime.ParseMediaType(ctype)
-	if err != nil {
-		return fmt.Errorf("httpErrorText: cannot parse `Content-Type`=`%v`. %v", ctype)
-	}
-
-	text := ""
-	switch mediatype {
-	case "text/plain", "text/html", "application/json":
-		body, er2 := ioutil.ReadAll(resp.Body)
-		if er2 != nil {
-			text = er2.Error()
-		} else {
-			text = string(body)
-		}
-	}
-	return fmt.Errorf("http error %v:\n%v", resp.StatusCode, FirstN(text,300))
 }

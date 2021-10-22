@@ -27,7 +27,29 @@ type (
 	}
 )
 
-var _ Telegram = (*telegramImpl)(nil)
+var (
+	_ Telegram = (*telegramImpl)(nil)
+
+	testMessageText = utils.Bt(`
+Message header!
+_Line_ *with* __inline__ ~markup~.
+{Line}+(with)-[special]=#symbols.
+
+[image](https://i.imgur.com/sMhpFyR.jpg)
+
+__error__:
+³³³
+not enough arguments, expected at least 3, got 0
+main.parseArgs
+        /home/dfc/src/github.com/pkg/errors/_examples/wrap/main.go:12
+main.main
+        /home/dfc/src/github.com/pkg/errors/_examples/wrap/main.go:18
+runtime.main
+        /home/dfc/go/src/runtime/proc.go:183
+runtime.goexit
+        /home/dfc/go/src/runtime/asm_amd64.s:2059
+³³³`)
+)
 
 func NewTelegram(token string, store UsersStore) (Telegram, error) {
 	bot, err := telego.NewBot(token)

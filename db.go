@@ -40,7 +40,9 @@ var _ badger.Logger = (*LogAdapter)(nil)
 
 func OpenDb(path string) (*Db, error) {
 	log.Info().Str("path", path).Msg("opening database")
-	opts := badger.DefaultOptions(path).WithLogger(&LogAdapter{&log.DefaultLogger})
+	opts := badger.DefaultOptions(path).
+		WithValueLogFileSize(10 * 1024 * 1024).
+		WithLogger(&LogAdapter{&log.DefaultLogger})
 
 	d, err := badger.Open(opts)
 
