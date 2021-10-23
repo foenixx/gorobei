@@ -149,36 +149,37 @@ func (g *Gorobei) UpdateAndSendDailyReport(total, skipped, errc int, lastError s
 	if err != nil {
 		return err
 	}
+	// daily reports are sent after 23:00
+	y, m, d := r.SentAt.Date()
+	planned := time.Date(y, m, d, 23, 0, 0, 0, r.SentAt.Location())
+	if r.SentAt.Sub(planned) > 0 {
+		// planned < r.SentAt
+		planned = planned.Add(24 * time.Hour)
+	}
+	// if Now() > planned send date?
+	if g.clock.Now().Sub(planned) > 0 {
+		// send the report
+		err = g.SendAdminMessage(g.FormatDailyReport(r))
+		if err != nil {
+			return err
+		}
+		// store new values
+		r.Run = 1
+		r.Total = total
+		r.Posted = total - skipped
+		r.Errors = errc
+		r.LastError = lastError
+		r.SentAt = g.clock.Now()
+		return g.d.StoreDailyReport(r)
+	}
+
+	// just update values
 	r.Posted += total - skipped
 	r.Errors = errc
 	r.Total = total
 	r.LastError = lastError
 	r.Run += 1
-	y, m, d := r.SentAt.Date()
-	// daily reports are sent after 23:00
-	planned := time.Date(y, m, d, 23, 0, 0, 0, r.SentAt.Location())
-
-	err = g.d.StoreDailyReport(r)
-	if err != nil {
-		return err
-	}
-
-	// if Now() <= planned send date?
-	if g.clock.Now().Sub(planned) <= 0 {
-		// don't send report
-		return nil
-	}
-
-	// send report
-	err = g.SendAdminMessage(g.FormatDailyReport(r))
-	if err != nil {
-		return err
-	}
-	r.Run = 0
-	r.Posted = 0
-	r.SentAt = g.clock.Now()
 	return g.d.StoreDailyReport(r)
-
 }
 
 func (g *Gorobei) processImage(src string) error {

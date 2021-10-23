@@ -44,15 +44,15 @@ func (f *httpFetcherImpl) FetchHtml(url string) (string, error) {
 	defer resp.Body.Close()
 
 	ctype := resp.Header.Get("Content-Type")
-	mediatype, _, err := mime.ParseMediaType(ctype)
+	mediaType, _, err := mime.ParseMediaType(ctype)
 	if err != nil {
-		return "", fmt.Errorf("cannot parse `Content-Type`=`%v`. %v", ctype)
+		return "", fmt.Errorf("cannot parse `Content-Type`=`%v`", ctype)
 	}
 
 
 
 	if resp.StatusCode != http.StatusOK {
-		return "", httpResponseError(resp, mediatype)
+		return "", httpResponseError(resp, mediaType)
 	}
 
 	body, err := ioutil.ReadAll(resp.Body)
