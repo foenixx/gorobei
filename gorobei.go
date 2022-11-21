@@ -68,7 +68,7 @@ func (g *Gorobei) Fetch(url string, limit int) error {
 		return err
 	}
 
-	re := regexp.MustCompile(`(?si)<div class="singlePost.*?<div class="postInner">\s*?<div class="paragraph">[^<]*<div[^<]*<img src=["']{1}(.*?)["']{1}`)
+	re := regexp.MustCompile(`(?si)<div class="sape_context"><img src=["'](.*?)["']`)
 	ma := re.FindAllStringSubmatch(string(body), -1)
 
 	var (
