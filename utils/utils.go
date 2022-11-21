@@ -68,3 +68,13 @@ func ByteArrToInt64(v []byte) (int64, error) {
 	}
 	return int64(binary.LittleEndian.Uint64(v)), nil
 }
+
+func ReverseSlice[Т any](s []Т) {
+	first := 0
+	last := len(s) - 1
+	for first < last {
+		s[first], s[last] = s[last], s[first]
+		first++
+		last--
+	}
+}

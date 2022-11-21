@@ -70,7 +70,7 @@ func (g *Gorobei) Fetch(url string, limit int) error {
 
 	re := regexp.MustCompile(`(?si)<div class="sape_context"><img src=["'](.*?)["']`)
 	ma := re.FindAllStringSubmatch(string(body), -1)
-
+	utils.ReverseSlice(ma)
 	var (
 		total, skipped, errc int
 		lastError            string
